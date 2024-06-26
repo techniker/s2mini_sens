@@ -165,8 +165,8 @@ void loop() {
 
     // Transmit only if the data is valid
     if (validate_readings(temperature, humidity)) {
-        client.publish("/Sens01/temp", tempStr);
-        client.publish("/Sens01/humidity", humStr);
+        client.publish("/Turm-Sens03/temp", tempStr);
+        client.publish("/Turm-Sens03/humidity", humStr);
 
     // Print the sensor data to the serial monitor
         Serial.print("Temperature: ");
