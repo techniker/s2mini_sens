@@ -1,14 +1,10 @@
-// Telaire T9602 MQTT Sensor Node for WEMOS s2 mini
-// Includes sensor check and restart in case of i2c failure
-//
-// tec < code att sixtopia.net >
-
 #include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include "telaire_T9602.h"
 #include "telaire_T9602.cpp"
 #include <Wire.h>
+#include <esp_task_wdt.h>  // Include watchdog library
 
 //WEMOS s2 mini board pins for i2c(was wrong in official documentation!): 
 //SCL - IO 35
@@ -29,6 +25,9 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 T9602 telairesensor;
 
+// Watchdog timeout in seconds
+const int WDT_TIMEOUT = 30; // 30 seconds
+
 void setup_wifi() {
     delay(10);
     Serial.println();
@@ -37,19 +36,27 @@ void setup_wifi() {
 
     WiFi.begin(ssid, password);
 
-    while (WiFi.status() != WL_CONNECTED) {
+    int wifi_attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && wifi_attempts < 20) { // Attempt to connect for 10 seconds max
         delay(500);
         Serial.print(".");
+        wifi_attempts++;
     }
 
-    Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("");
+        Serial.println("WiFi connected");
+        Serial.println("IP address: ");
+        Serial.println(WiFi.localIP());
+    } else {
+        Serial.println("WiFi connection failed, rebooting...");
+        ESP.restart(); // Reboot if WiFi fails to connect
+    }
 }
 
 void reconnect_mqtt() {
-    while (!client.connected()) {
+    int mqtt_attempts = 0;
+    while (!client.connected() && mqtt_attempts < 6) { // Attempt to connect for 30 seconds max
         Serial.print("Attempting MQTT connection...");
         // Attempt to connect with MQTT username and password
         if (client.connect("Turm-Sens03", mqtt_user, mqtt_password)) {
@@ -59,7 +66,13 @@ void reconnect_mqtt() {
             Serial.print(client.state());
             Serial.println(" try again in 5 seconds");
             delay(5000);
+            mqtt_attempts++;
         }
+    }
+
+    if (!client.connected()) {
+        Serial.println("MQTT connection failed, rebooting...");
+        ESP.restart(); // Reboot if MQTT fails to connect
     }
 }
 
@@ -101,9 +114,15 @@ void setup() {
     pinMode(GPIO_NUM_4, OUTPUT);
     power_cycle_sensor(); 
     // Ensure the sensor is powered on
+
+    // Initialize the watchdog timer
+    esp_task_wdt_init(WDT_TIMEOUT, true);
+    esp_task_wdt_add(NULL); // Add current thread to watchdog
 }
 
 void loop() {
+    esp_task_wdt_reset(); // Reset watchdog timer
+
     if (WiFi.status() != WL_CONNECTED) {
         setup_wifi();
     }
@@ -146,8 +165,8 @@ void loop() {
 
     // Transmit only if the data is valid
     if (validate_readings(temperature, humidity)) {
-        client.publish("/Sens01/temp", tempStr);
-        client.publish("/Sens01/humidity", humStr);
+        client.publish("/Turm-Sens03/temp", tempStr);
+        client.publish("/Turm-Sens03/humidity", humStr);
 
     // Print the sensor data to the serial monitor
         Serial.print("Temperature: ");
